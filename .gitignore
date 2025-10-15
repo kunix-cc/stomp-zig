@@ -1,0 +1,5 @@
+.zig-cache
+zig-out
+.fleet
+.github
+tcp-server.py
