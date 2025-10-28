@@ -6,38 +6,29 @@ test "Stompframe.init" {
     var parsed_frame = try StompFrame.init(allocator, frame);
     defer parsed_frame.deinit();
 
-    std.debug.print("command: {s}\n", .{parsed_frame.command});
     try std.testing.expectEqualStrings("TEST", parsed_frame.command);
 
-    var entry_count: usize = 0;
-    for (parsed_frame.headers.keys()) |key| {
-        std.debug.print("key: {s}, value: {s}\n", .{ key, parsed_frame.headers.get(key).? });
-        switch (entry_count) {
-            0 => {
-                try std.testing.expectEqualStrings("header1", key);
-                try std.testing.expectEqualStrings("value1", parsed_frame.headers.get(key).?);
-            },
-            1 => {
-                try std.testing.expectEqualStrings("header2", key);
-                try std.testing.expectEqualStrings("value2", parsed_frame.headers.get(key).?);
-            },
-            else => unreachable,
-        }
-        entry_count += 1;
-    }
+    try std.testing.expectEqual(2, parsed_frame.headers.count());
 
-    std.debug.print("body: {s}\n", .{parsed_frame.body});
+    const header1 = parsed_frame.headers.get("header1").?;
+    try std.testing.expectEqualStrings("value1", header1);
+
+    const header2 = parsed_frame.headers.get("header2").?;
+    try std.testing.expectEqualStrings("value2", header2);
+
     try std.testing.expectEqualStrings("body", parsed_frame.body);
 }
 
 test readLine {
-    const data = "TestData";
+    const data = "line1\nline2\nline3";
     var reader = std.Io.Reader.fixed(data);
     const line1 = try readLine(&reader);
     const line2 = try readLine(&reader);
     const line3 = try readLine(&reader);
-    std.debug.print("line1: {s}, line2: {s}.\n", .{ line1, line2 });
-    std.debug.print("line3: {s}\n", .{line3});
+
+    try std.testing.expectEqualStrings("line1", line1);
+    try std.testing.expectEqualStrings("line2", line2);
+    try std.testing.expectEqualStrings("line3", line3);
 }
 
 fn readLine(r: *std.Io.Reader) ![]u8 {
@@ -61,12 +52,14 @@ const StompFrame = struct {
     body: []const u8,
 
     pub fn print(self: StompFrame) void {
-        std.debug.print("Response is cmd: {s}\n", .{self.command});
+        std.debug.print("==== STOMP FRAME ====\n", .{});
+        std.debug.print("COMMAND: {s}\n", .{self.command});
         var iterator = self.headers.iterator();
         while (iterator.next()) |header| {
-            std.debug.print("header key: {s}, value: {s}\n", .{ header.key_ptr.*, header.value_ptr.* });
+            std.debug.print("HEADER: {s} : {s}\n", .{ header.key_ptr.*, header.value_ptr.* });
         }
-        std.debug.print("body: {s}\n", .{self.body});
+        std.debug.print("BODY: {s}\n", .{self.body});
+        std.debug.print("=====================\n", .{});
     }
 
     fn normalize(allocator: std.mem.Allocator, frame: []const u8) ![]u8 {
@@ -175,7 +168,7 @@ pub const Consumer = struct {
         self.connected_stream.close();
     }
 
-    pub fn connect(self: *Self, host: []const u8, user: []const u8, passcode: []const u8) !void {
+    pub fn connect(self: *Self, host: []const u8, user: []const u8, passcode: []const u8) !StompFrame {
         self.connected_stream = try std.net.tcpConnectToAddress(self.remote_addr);
 
         const connect_template =
@@ -202,10 +195,7 @@ pub const Consumer = struct {
         var r_buffer: [1024]u8 = undefined;
         var reader = self.connected_stream.reader(&r_buffer);
         const io_reader = reader.interface();
-        const response = try readFrame(allocator, io_reader);
-
-        // Debug print
-        response.print();
+        return try readFrame(allocator, io_reader);
     }
 
     pub fn disconnect(self: *Self) !void {
@@ -239,7 +229,7 @@ pub const Consumer = struct {
         try writeFrame(&writer.interface, frame);
     }
 
-    pub fn recvMessage(self: *Self, allocator: std.mem.Allocator) !StompFrame {
+    pub fn readMessage(self: *Self, allocator: std.mem.Allocator) !StompFrame {
         var r_buffer: [1024]u8 = undefined;
         var reader = self.connected_stream.reader(&r_buffer);
         const io_reader = reader.interface();

@@ -7,14 +7,15 @@ pub fn main() !void {
     defer consumer.deinit();
 
     std.debug.print("Connecting to STOMP server...\n", .{});
-    try consumer.connect("localhost", "test-user", "password");
+    const response = try consumer.connect("localhost", "test-user", "password");
+    response.print();
     std.debug.print("Connect success!!!\n", .{});
 
     try consumer.subscribe("0", "test", "auto");
     std.debug.print("Subscribing now...\n", .{});
 
     const allocator = std.heap.page_allocator;
-    while (consumer.recvMessage(allocator)) |msg| {
+    while (consumer.readMessage(allocator)) |msg| {
         msg.print();
     } else |_| {
         std.debug.print("Error receiving message.\n", .{});
