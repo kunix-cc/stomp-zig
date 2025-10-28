@@ -1,6 +1,6 @@
 const std = @import("std");
 
-test "STOMP frame init" {
+test "Stompframe.init" {
     const frame = "TEST\r\nheader1:value1\r\nheader2:value2\r\n\r\nbody\x00\r\n";
     const allocator = std.testing.allocator;
     var parsed_frame = try StompFrame.init(allocator, frame);
@@ -30,12 +30,44 @@ test "STOMP frame init" {
     try std.testing.expectEqualStrings("body", parsed_frame.body);
 }
 
+test readLine {
+    const data = "TestData";
+    var reader = std.Io.Reader.fixed(data);
+    const line1 = try readLine(&reader);
+    const line2 = try readLine(&reader);
+    const line3 = try readLine(&reader);
+    std.debug.print("line1: {s}, line2: {s}.\n", .{ line1, line2 });
+    std.debug.print("line3: {s}\n", .{line3});
+}
+
+fn readLine(r: *std.Io.Reader) ![]u8 {
+    const line = r.peekDelimiterInclusive('\n') catch |err| switch (err) {
+        error.EndOfStream, error.StreamTooLong => {
+            const line = r.buffer[r.seek..r.end];
+            r.toss(line.len);
+            return line;
+        },
+        else => return err,
+    };
+    r.toss(line.len);
+    return line[0 .. line.len - 1];
+}
+
 const StompFrame = struct {
     allocator: std.mem.Allocator,
     frame_buffer: []u8,
     command: []const u8,
     headers: std.StringArrayHashMapUnmanaged([]const u8),
     body: []const u8,
+
+    pub fn print(self: StompFrame) void {
+        std.debug.print("Response is cmd: {s}\n", .{self.command});
+        var iterator = self.headers.iterator();
+        while (iterator.next()) |header| {
+            std.debug.print("header key: {s}, value: {s}\n", .{ header.key_ptr.*, header.value_ptr.* });
+        }
+        std.debug.print("body: {s}\n", .{self.body});
+    }
 
     fn normalize(allocator: std.mem.Allocator, frame: []const u8) ![]u8 {
         const needle = "\r\n";
@@ -52,11 +84,11 @@ const StompFrame = struct {
         const normalized_frame = try normalize(allocator, frame);
 
         var reader = std.io.Reader.fixed(normalized_frame);
-        const command = try reader.takeDelimiterExclusive('\n');
+        const command = try readLine(&reader);
 
         var headers: std.StringArrayHashMapUnmanaged([]const u8) = .empty;
 
-        while (reader.takeDelimiterExclusive('\n')) |line| {
+        while (readLine(&reader)) |line| {
             if (line.len == 0) break;
 
             const delimiter_index = std.mem.indexOf(u8, line, ":").?;
@@ -64,7 +96,7 @@ const StompFrame = struct {
             const value = line[delimiter_index + 1 .. line.len];
             try headers.put(allocator, key, value);
         } else |err| {
-            if (err != error.EndOfStream) return err;
+            return err;
         }
         const body = try reader.takeDelimiterExclusive('\x00');
 
@@ -97,13 +129,20 @@ test writeFrame {
 }
 
 fn readFrame(allocator: std.mem.Allocator, reader: *std.Io.Reader) !StompFrame {
-    std.debug.print("Reading frame...\n", .{});
-    const frame = try reader.readAlloc(allocator, reader.end);
-    defer allocator.free(frame);
+    var buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer buffer.deinit(allocator);
+
+    while (readLine(reader)) |line| {
+        try buffer.appendSlice(allocator, line);
+        try buffer.append(allocator, '\n');
+        if (std.mem.containsAtLeastScalar(u8, line, 1, '\x00')) break;
+    } else |_| {
+        std.debug.print("Can not read response.\n", .{});
+    }
 
     return try StompFrame.init(
         allocator,
-        frame,
+        buffer.allocatedSlice(),
     );
 }
 
@@ -164,7 +203,9 @@ pub const Consumer = struct {
         var reader = self.connected_stream.reader(&r_buffer);
         const io_reader = reader.interface();
         const response = try readFrame(allocator, io_reader);
-        std.debug.print("Response: {s}", .{response.command});
+
+        // Debug print
+        response.print();
     }
 
     pub fn disconnect(self: *Self) !void {

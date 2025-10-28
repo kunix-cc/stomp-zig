@@ -8,12 +8,14 @@ pub fn main() !void {
 
     std.debug.print("Connecting to STOMP server...\n", .{});
     try consumer.connect("localhost", "test-user", "password");
+    std.debug.print("Connect success!!!\n", .{});
 
     try consumer.subscribe("0", "test", "auto");
+    std.debug.print("Subscribing now...\n", .{});
 
     const allocator = std.heap.page_allocator;
     while (consumer.recvMessage(allocator)) |msg| {
-        std.debug.print("Received message: {s}\n", .{msg.command});
+        msg.print();
     } else |_| {
         std.debug.print("Error receiving message.\n", .{});
     }
